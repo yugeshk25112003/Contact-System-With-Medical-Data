@@ -1,0 +1,134 @@
+from tkinter import *
+import sqlite3
+import tkinter.ttk as ttk
+import tkinter.messagebox as mb
+
+def db_op(query, params=(), fetch=False):
+    conn = sqlite3.connect("pythontut.db")
+    cursor = conn.cursor()
+    cursor.execute(query, params)
+    if fetch:
+        data = cursor.fetchall()
+        conn.close()
+        return data
+    conn.commit()
+    conn.close()
+
+def refresh_table(search_term=None):
+    tree.delete(*tree.get_children())
+    
+    if search_term:
+        query = """SELECT * FROM member WHERE 
+                   blood_group LIKE ? OR 
+                   firstname LIKE ? OR 
+                   lastname LIKE ? 
+                   ORDER BY lastname ASC"""
+        wrapped_term = f'%{search_term}%'
+        data = db_op(query, (wrapped_term, wrapped_term, wrapped_term), fetch=True)
+    else:
+        data = db_op("SELECT * FROM member ORDER BY lastname ASC", fetch=True)
+        
+    for row in data:
+        tree.insert('', 'end', values=row)
+
+def save_data(m_id=None):
+    vals = (FIRSTNAME.get(), LASTNAME.get(), GENDER.get(), AGE.get(), 
+            ADDRESS.get(), CONTACT.get(), BLOOD.get())
+
+    if vals[0] == "" or vals[1] == "" or vals[6] == "":
+        return mb.showwarning('Error', 'Please fill in Name and Blood Group!')
+
+    if m_id:
+        db_op("UPDATE member SET firstname=?, lastname=?, gender=?, age=?, address=?, contact=?, blood_group=? WHERE mem_id=?", 
+              vals + (m_id,))
+    else:
+        db_op("INSERT INTO member (firstname, lastname, gender, age, address, contact, blood_group) VALUES(?,?,?,?,?,?,?)", 
+              vals)
+    
+    refresh_table()
+    win.destroy()
+
+def delete_data():
+    if not tree.selection(): return mb.showwarning('Error', 'Select a record first')
+    if mb.askquestion('Confirm', 'Delete this record?') == 'yes':
+        db_op("DELETE FROM member WHERE mem_id=?", (tree.item(tree.focus())['values'][0],))
+        refresh_table()
+
+def open_form(m_id=None):
+    global win
+    win = Toplevel()
+    win.title("Contact Details")
+    win.geometry("450x450")
+    
+    fields = [("Firstname", FIRSTNAME), ("Lastname", LASTNAME), ("Age", AGE), 
+              ("Address", ADDRESS), ("Contact", CONTACT)]
+    
+    Label(win, text="CONTACT INFORMATION", font=('arial', 12, 'bold'), bg="#333", fg="white").pack(fill=X, pady=5)
+    
+    f = Frame(win); f.pack(pady=10)
+    for i, (label_text, var) in enumerate(fields):
+        Label(f, text=label_text).grid(row=i, column=0, sticky=W, padx=5, pady=5)
+        Entry(f, textvariable=var, width=30).grid(row=i, column=1, padx=5, pady=5)
+
+    Label(f, text="Blood Group").grid(row=5, column=0, sticky=W, padx=5, pady=5)
+    blood_dropdown = ttk.Combobox(f, textvariable=BLOOD, width=28, state="readonly")
+    blood_dropdown['values'] = ("A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-")
+    blood_dropdown.grid(row=5, column=1, padx=5, pady=5)
+
+    Label(f, text="Gender").grid(row=6, column=0, sticky=W, padx=5, pady=5)
+    rf = Frame(f); rf.grid(row=6, column=1, sticky=W)
+    Radiobutton(rf, text="Male", variable=GENDER, value="Male").pack(side=LEFT)
+    Radiobutton(rf, text="Female", variable=GENDER, value="Female").pack(side=LEFT)
+    
+    Button(win, text="SAVE RECORD", bg="#66ff66", font=('arial', 10, 'bold'), width=25, height=2,
+           command=lambda: save_data(m_id)).pack(pady=20)
+
+def on_select(e):
+    item = tree.focus()
+    if not item: return
+    sel = tree.item(item)['values']
+    vars = [FIRSTNAME, LASTNAME, GENDER, AGE, ADDRESS, CONTACT, BLOOD]
+    for i, var in enumerate(vars):
+        var.set(sel[i+1])
+    open_form(sel[0])
+
+root = Tk()
+root.title("Contact System with Medical Data")
+root.geometry("950x600")
+
+FIRSTNAME, LASTNAME, GENDER, AGE, ADDRESS, CONTACT, BLOOD, SEARCH = [StringVar() for _ in range(8)]
+
+search_frame = Frame(root, bg="#eee", bd=1, relief=RIDGE)
+search_frame.pack(fill=X, padx=20, pady=10)
+
+Label(search_frame, text="Search (Name or Blood Group):", bg="#eee", font=('arial', 10, 'bold')).pack(side=LEFT, padx=10, pady=10)
+search_entry = Entry(search_frame, textvariable=SEARCH, width=30)
+search_entry.pack(side=LEFT, padx=10)
+
+Button(search_frame, text="Search", width=10, command=lambda: refresh_table(SEARCH.get())).pack(side=LEFT, padx=5)
+Button(search_frame, text="Reset", width=10, command=lambda: [SEARCH.set(""), refresh_table()]).pack(side=LEFT, padx=5)
+
+btn_bar = Frame(root); btn_bar.pack(fill=X, padx=20, pady=5)
+
+def clear_and_open():
+    for v in [FIRSTNAME, LASTNAME, GENDER, AGE, ADDRESS, CONTACT, BLOOD]: v.set("")
+    open_form()
+
+Button(btn_bar, text="+ ADD NEW DATA", bg="#66ff66", font=('arial', 9, 'bold'), command=clear_and_open).pack(side=LEFT)
+Button(btn_bar, text="DELETE RECORD", bg="#ff4444", fg="white", font=('arial', 9, 'bold'), command=delete_data).pack(side=RIGHT)
+
+tree = ttk.Treeview(root, columns=(1,2,3,4,5,6,7,8), show='headings')
+cols = ["ID", "First Name", "Last Name", "Gender", "Age", "Address", "Contact", "Blood Group"]
+for i, c in enumerate(cols, 1):
+    tree.heading(i, text=c)
+    tree.column(i, width=100, anchor=CENTER)
+
+tree.pack(fill=BOTH, expand=1, padx=20, pady=10)
+tree.bind('<Double-Button-1>', on_select)
+db_op("""CREATE TABLE IF NOT EXISTS member (
+    mem_id INTEGER PRIMARY KEY AUTOINCREMENT, 
+    firstname TEXT, lastname TEXT, gender TEXT, 
+    age TEXT, address TEXT, contact TEXT, blood_group TEXT)""")
+
+refresh_table()
+root.mainloop()
